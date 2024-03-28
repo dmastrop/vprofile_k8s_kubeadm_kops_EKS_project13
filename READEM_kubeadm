@@ -1,0 +1,604 @@
+
+#shell scripts below with notes
+
+
+# References:
+
+# https://kubernetes.io/docs/setup/production-environment/tools/kubeadm/install-kubeadm/
+
+
+# https://kubernetes.io/docs/setup/production-environment/tools/kubeadm/create-cluster-kubeadm/
+
+
+
+
+master 192.168.56.2
+worker1 192.168.56.3
+worker2 192.168.56.4
+
+
+
+########################################## File 1
+
+# Vagrant file will launch 1 master node and 2 worker nodes
+
+
+Vagrant.configure("2") do |config|
+  config.hostmanager.enabled = true 
+  config.hostmanager.manage_host = true
+  config.vm.define "kubemaster" do |kubemaster|
+    kubemaster.vm.box = "ubuntu/bionic64"
+  kubemaster.vm.network "private_network", ip: "192.168.56.2"
+  kubemaster.vm.provider "virtualbox" do |vb|
+            vb.name = "kubemaster"
+            vb.memory = 2048
+            vb.cpus = 2
+        end
+  kubemaster.vm.hostname = "kubemaster"
+  kubemaster.vm.provision "shell", path: "kubemaster-init.sh"   <<< SEE BELOW
+  end
+
+
+
+  config.vm.define "kubenode1" do |kubenode1|
+    kubenode1.vm.box = "ubuntu/bionic64"
+  kubenode1.vm.network "private_network", ip: "192.168.56.3"  <<<< bring up the worker nodes
+        kubenode1.vm.provider "virtualbox" do |vb|
+            vb.name = "kubenode1"
+            vb.memory = 1028
+            vb.cpus = 2
+        end
+        kubenode1.vm.hostname = "kubenode1"
+  kubenode1.vm.provision "shell", path: "kubenode1-init.sh"  <<<< SEE BELOW. This will run the cltjoincommand.sh that is generated from the master kubemaster-init.sh script during master node setup kubemaster-init.sh
+  end
+
+
+
+  config.vm.define "kubenode2" do |kubenode2|
+    kubenode2.vm.box = "ubuntu/bionic64"
+        kubenode2.vm.network "private_network", ip: "192.168.56.4"
+        kubenode2.vm.provider "virtualbox" do |vb|
+            vb.name = "kubenode2"
+            vb.memory = 1028
+            vb.cpus = 2
+        end
+        kubenode2.vm.hostname = "kubenode2"
+  kubenode2.vm.provision "shell", path: "kubenode2-init.sh"   <<<<< SEE BELOW
+  end
+end
+
+
+
+
+
+
+
+###################### File 2
+
+#Master kubemaster-init.sh
+
+#!/bin/bash
+
+## Set variables values
+MASTER_IP=192.168.56.2
+
+lsmod | grep br_netfilter
+sudo modprobe br_netfilter
+lsmod | grep br_netfilter
+cat <<EOF | sudo tee /etc/sysctl.d/k8s.conf
+net.bridge.bridge-nf-call-ip6tables = 1
+net.bridge.bridge-nf-call-iptables = 1
+EOF
+sudo sysctl --system
+
+## INSTALLING DOCKER ENGINE BASED ON OS   << on redhat CentOS
+
+yum --help &>> /dev/null
+if [ $? -eq 0 ]
+then
+  # (Install Docker CE)
+  ## Set up the repository
+  ### Install required packages
+  yum install -y yum-utils device-mapper-persistent-data lvm2
+  ## Add the Docker repository
+  yum-config-manager --add-repo \
+    https://download.docker.com/linux/centos/docker-ce.repo
+  # Install Docker CE
+  yum update -y && yum install -y \
+    containerd.io-1.2.13 \
+    docker-ce-19.03.11 \
+    docker-ce-cli-19.03.11
+  ## Create /etc/docker
+  mkdir /etc/docker
+  # Set up the Docker daemon
+  cat > /etc/docker/daemon.json <<EOF
+  {
+    "exec-opts": ["native.cgroupdriver=systemd"],
+    "log-driver": "json-file",
+    "log-opts": {
+      "max-size": "100m"
+    },
+    "storage-driver": "overlay2",
+    "storage-opts": [
+      "overlay2.override_kernel_check=true"
+    ]
+  }
+EOF
+
+
+
+
+  mkdir -p /etc/systemd/system/docker.service.d
+  # Restart Docker
+  systemctl daemon-reload
+  systemctl restart docker
+  sudo systemctl enable docker
+
+
+
+
+else        <<<<<<<<<<<<<< this is for ubuntu instead of CentOS
+  # (Install Docker CE)
+  ## Set up the repository:
+  ### Install packages to allow apt to use a repository over HTTPS
+  apt-get update && apt-get install -y \
+    apt-transport-https ca-certificates curl software-properties-common gnupg2
+  # Add Docker's official GPG key:
+  curl -fsSL https://download.docker.com/linux/ubuntu/gpg | apt-key add -
+  # Add the Docker apt repository:
+  add-apt-repository \
+    "deb [arch=amd64] https://download.docker.com/linux/ubuntu \
+    $(lsb_release -cs) \
+    stable"
+  # Install Docker CE
+  apt-get update && apt-get install -y \
+    containerd.io=1.2.13-2 \
+    docker-ce=5:19.03.11~3-0~ubuntu-$(lsb_release -cs) \
+    docker-ce-cli=5:19.03.11~3-0~ubuntu-$(lsb_release -cs)
+  # Set up the Docker daemon
+  cat > /etc/docker/daemon.json <<EOF
+  {
+    "exec-opts": ["native.cgroupdriver=systemd"],
+    "log-driver": "json-file",
+    "log-opts": {
+      "max-size": "100m"
+    },
+    "storage-driver": "overlay2"
+  }
+EOF
+
+
+
+  mkdir -p /etc/systemd/system/docker.service.d
+  # Restart Docker
+  systemctl daemon-reload
+  systemctl restart docker
+  sudo systemctl enable docker
+
+fi
+
+sleep 30
+
+
+
+
+
+
+## Installing kubeadm, kubelet and kubectl
+yum --help &>> /dev/null
+if [ $? -eq 0 ]
+then
+   cat <<EOF | sudo tee /etc/yum.repos.d/kubernetes.repo
+   [kubernetes]
+   name=Kubernetes
+   baseurl=https://packages.cloud.google.com/yum/repos/kubernetes-el7-\$basearch
+   enabled=1
+   gpgcheck=1
+   repo_gpgcheck=1
+   gpgkey=https://packages.cloud.google.com/yum/doc/yum-key.gpg https://packages.cloud.google.com/yum/doc/rpm-package-key.gpg
+   exclude=kubelet kubeadm kubectl
+EOF
+
+
+
+
+
+   # Set SELinux in permissive mode (effectively disabling it)
+   sudo setenforce 0
+   sudo sed -i 's/^SELINUX=enforcing$/SELINUX=permissive/' /etc/selinux/config
+
+   sudo yum install -y kubelet kubeadm kubectl --disableexcludes=Kubernetes   <<<< redhat CentOS machine
+
+   sudo systemctl enable --now kubelet
+   systemctl stop firewalld
+   systemctl disable firewalld
+
+else
+
+   sudo apt-get update && sudo apt-get install -y apt-transport-https curl     <<<<<< ubuntu machine
+   curl -s https://packages.cloud.google.com/apt/doc/apt-key.gpg | sudo apt-key add -
+   cat <<EOF | sudo tee /etc/apt/sources.list.d/kubernetes.list
+   deb https://apt.kubernetes.io/ kubernetes-xenial main
+EOF
+   sudo apt-get update
+   sudo apt-get install -y kubelet kubeadm kubectl
+   sudo apt-mark hold kubelet kubeadm kubectl
+   systemctl stop ufw
+   systemctl disable ufw
+fi
+
+#sleep 30
+
+sudo kubeadm init --pod-network-cidr 10.244.0.0/16 --apiserver-advertise-address=192.168.56.2 > /tmp/kubeadm_out.log   <<<<10.244.0.0 is the pod network and 192.168.56.2 is the master node.  This is piped into a file that have the commands that need to be executed on worker nodes for them to join to the master (see below). The file is kubeadm_out.log.  https://kubernetes.io/docs/setup/production-environment/tools/kubeadm/create-cluster-kubeadm/
+
+sleep 360
+
+/vagrant/set-kubeconfig.sh   <<< next execute this script Sets the .kube/config file on the master so that kubectl can be run in the context. This is done via the admin.conf.
+
+
+sudo kubectl apply -f "https://cloud.weave.works/k8s/net?k8s-version=$(kubectl version | base64 | tr -d '\n')" <<<< creates the weave works network. This will permit the worker nodes to connect to the master nodes.
+kubectl apply -f "https://cloud.weave.works/k8s/net?k8s-version=$(kubectl version | base64 | tr -d '\n')"
+sleep 60
+
+
+sudo cat /tmp/kubeadm_out.log | grep -A1 'kubeadm join' > /vagrant/cltjoincommand.sh  <<< this script executed on the worker node to join worker nodes to the master node. This is generated as shown from the kubeadm_out.log.   This is essentially part of the kubeadm_out.log output file above in green.  This is executed when the vagrant starts and run the worker node script Kubenode1-init.sh and kubenode2-init.sh See vagrant file above and the worker node scxripts below.
+sudo chmod +x /vagrant/cltjoincommand.sh
+
+
+
+
+
+
+########################################################
+
+
+# Network options (we will use weaveworks)
+
+# https://kubernetes.io/docs/concepts/cluster-administration/networking/#how-to-implement-the-kubernetes-network-model
+
+# https://kubernetes.io/docs/concepts/cluster-administration/addons/#networking-and-network-policy
+
+
+# sudo kubectl apply -f "https://cloud.weave.works/k8s/net?k8s-version=$(kubectl version | base64 | tr -d '\n')"
+
+
+
+
+
+
+####################################### File 3
+
+# set-kubeconfig.sh will be executed on master node and sets the .kube/config context so that kubectl can be run on the master for monitoring the worker nodes and pods.
+
+sudo mkdir -p /home/vagrant/.kube
+sudo cp -f /etc/kubernetes/admin.conf /home/vagrant/.kube/config
+sudo chown -R vagrant.vagrant /home/vagrant/.kube
+sudo mkdir -p /root/.kube
+sudo cp -f /etc/kubernetes/admin.conf /root/.kube/config
+sudo chown -R root.root /root/.kube
+mkdir -p $HOME/.kube
+sudo cp /etc/kubernetes/admin.conf $HOME/.kube/config
+sudo chown $(id -u):$(id -g) $HOME/.kube/config
+
+
+
+
+
+
+################################## File 4
+
+
+# cltjoincommand.sh SAMPLE on worker node generated on master node and piped to output file which will then be run as /vagrant/cltjoincommand.sh on both worker nodes
+# the token is not valid
+
+kubeadm join 192.168.56.2:6443 --token w45v86.m6hh90rsyiaalkmm \
+    --discovery-token-ca-cert-hash sha256:8fc8310b4fc3f69720c3b77209253a93b0d4c409553c6bd865d07978ddacb80a 
+
+
+
+
+
+
+
+###############################  File 5
+
+
+
+# Kubenode1-init.sh on worker node1
+
+#!/bin/bash
+
+lsmod | grep br_netfilter
+sudo modprobe br_netfilter
+lsmod | grep br_netfilter
+cat <<EOF | sudo tee /etc/sysctl.d/k8s.conf
+net.bridge.bridge-nf-call-ip6tables = 1
+net.bridge.bridge-nf-call-iptables = 1
+EOF
+sudo sysctl --system
+
+## INSTALLING DOCKER ENGINE BASED ON OS
+
+yum --help &>> /dev/null
+if [ $? -eq 0 ]
+then
+  # (Install Docker CE)
+  ## Set up the repository
+  ### Install required packages
+  yum install -y yum-utils device-mapper-persistent-data lvm2
+  ## Add the Docker repository
+  yum-config-manager --add-repo \
+    https://download.docker.com/linux/centos/docker-ce.repo
+  # Install Docker CE
+  yum update -y && yum install -y \
+    containerd.io-1.2.13 \
+    docker-ce-19.03.11 \
+    docker-ce-cli-19.03.11
+  ## Create /etc/docker
+  mkdir /etc/docker
+  # Set up the Docker daemon
+  cat > /etc/docker/daemon.json <<EOF
+  {
+    "exec-opts": ["native.cgroupdriver=systemd"],
+    "log-driver": "json-file",
+    "log-opts": {
+      "max-size": "100m"
+    },
+    "storage-driver": "overlay2",
+    "storage-opts": [
+      "overlay2.override_kernel_check=true"
+    ]
+  }
+EOF
+  mkdir -p /etc/systemd/system/docker.service.d
+  # Restart Docker
+  systemctl daemon-reload
+  systemctl restart docker
+  sudo systemctl enable docker
+  
+else
+  # (Install Docker CE)
+  ## Set up the repository:
+  ### Install packages to allow apt to use a repository over HTTPS
+  apt-get update && apt-get install -y \
+    apt-transport-https ca-certificates curl software-properties-common gnupg2
+  # Add Docker's official GPG key:
+  curl -fsSL https://download.docker.com/linux/ubuntu/gpg | apt-key add -
+  # Add the Docker apt repository:
+  add-apt-repository \
+    "deb [arch=amd64] https://download.docker.com/linux/ubuntu \
+    $(lsb_release -cs) \
+    stable"
+  # Install Docker CE
+  apt-get update && apt-get install -y \
+    containerd.io=1.2.13-2 \
+    docker-ce=5:19.03.11~3-0~ubuntu-$(lsb_release -cs) \
+    docker-ce-cli=5:19.03.11~3-0~ubuntu-$(lsb_release -cs)
+  # Set up the Docker daemon
+  cat > /etc/docker/daemon.json <<EOF
+  {
+    "exec-opts": ["native.cgroupdriver=systemd"],
+    "log-driver": "json-file",
+    "log-opts": {
+      "max-size": "100m"
+    },
+    "storage-driver": "overlay2"
+  }
+EOF
+  mkdir -p /etc/systemd/system/docker.service.d
+  # Restart Docker
+  systemctl daemon-reload
+  systemctl restart docker
+  sudo systemctl enable docker
+
+fi
+
+sleep 30
+
+## Installing kubeadm, kubelet and kubectl 
+yum --help &>> /dev/null
+if [ $? -eq 0 ]
+then
+   cat <<EOF | sudo tee /etc/yum.repos.d/kubernetes.repo
+   [kubernetes]
+   name=Kubernetes
+   baseurl=https://packages.cloud.google.com/yum/repos/kubernetes-el7-\$basearch
+   enabled=1
+   gpgcheck=1
+   repo_gpgcheck=1
+   gpgkey=https://packages.cloud.google.com/yum/doc/yum-key.gpg https://packages.cloud.google.com/yum/doc/rpm-package-key.gpg
+   exclude=kubelet kubeadm kubectl
+EOF
+   
+   # Set SELinux in permissive mode (effectively disabling it)
+   sudo setenforce 0
+   sudo sed -i 's/^SELINUX=enforcing$/SELINUX=permissive/' /etc/selinux/config
+   
+   sudo yum install -y kubelet kubeadm kubectl --disableexcludes=kubernetes
+   
+   sudo systemctl enable --now kubelet
+   systemctl stop firewalld
+   systemctl disable firewalld
+   
+else
+   
+   sudo apt-get update && sudo apt-get install -y apt-transport-https curl
+   curl -s https://packages.cloud.google.com/apt/doc/apt-key.gpg | sudo apt-key add -
+   cat <<EOF | sudo tee /etc/apt/sources.list.d/kubernetes.list
+   deb https://apt.kubernetes.io/ kubernetes-xenial main
+EOF
+   sudo apt-get update
+   sudo apt-get install -y kubelet kubeadm kubectl
+   sudo apt-mark hold kubelet kubeadm kubectl
+   systemctl stop ufw
+   systemctl disable ufw
+fi
+
+
+
+sleep 30
+sudo chmod +x /vagrant/cltjoincommand.sh   <<<< this joins this worker node to the master
+sudo /vagrant/cltjoincommand.sh
+
+
+
+
+
+
+######################### file 6
+
+# Kubenode2-init.sh on worker node2
+
+
+#!/bin/bash
+
+lsmod | grep br_netfilter
+sudo modprobe br_netfilter
+lsmod | grep br_netfilter
+cat <<EOF | sudo tee /etc/sysctl.d/k8s.conf
+net.bridge.bridge-nf-call-ip6tables = 1
+net.bridge.bridge-nf-call-iptables = 1
+EOF
+sudo sysctl --system
+
+## INSTALLING DOCKER ENGINE BASED ON OS
+
+yum --help &>> /dev/null
+if [ $? -eq 0 ]
+then
+  # (Install Docker CE)
+  ## Set up the repository
+  ### Install required packages
+  yum install -y yum-utils device-mapper-persistent-data lvm2
+  ## Add the Docker repository
+  yum-config-manager --add-repo \
+    https://download.docker.com/linux/centos/docker-ce.repo
+  # Install Docker CE
+  yum update -y && yum install -y \
+    containerd.io-1.2.13 \
+    docker-ce-19.03.11 \
+    docker-ce-cli-19.03.11
+  ## Create /etc/docker
+  mkdir /etc/docker
+  # Set up the Docker daemon
+  cat > /etc/docker/daemon.json <<EOF
+  {
+    "exec-opts": ["native.cgroupdriver=systemd"],
+    "log-driver": "json-file",
+    "log-opts": {
+      "max-size": "100m"
+    },
+    "storage-driver": "overlay2",
+    "storage-opts": [
+      "overlay2.override_kernel_check=true"
+    ]
+  }
+EOF
+  mkdir -p /etc/systemd/system/docker.service.d
+  # Restart Docker
+  systemctl daemon-reload
+  systemctl restart docker
+  sudo systemctl enable docker
+  
+else
+  # (Install Docker CE)
+  ## Set up the repository:
+  ### Install packages to allow apt to use a repository over HTTPS
+  apt-get update && apt-get install -y \
+    apt-transport-https ca-certificates curl software-properties-common gnupg2
+  # Add Docker's official GPG key:
+  curl -fsSL https://download.docker.com/linux/ubuntu/gpg | apt-key add -
+  # Add the Docker apt repository:
+  add-apt-repository \
+    "deb [arch=amd64] https://download.docker.com/linux/ubuntu \
+    $(lsb_release -cs) \
+    stable"
+  # Install Docker CE
+  apt-get update && apt-get install -y \
+    containerd.io=1.2.13-2 \
+    docker-ce=5:19.03.11~3-0~ubuntu-$(lsb_release -cs) \
+    docker-ce-cli=5:19.03.11~3-0~ubuntu-$(lsb_release -cs)
+  # Set up the Docker daemon
+  cat > /etc/docker/daemon.json <<EOF
+  {
+    "exec-opts": ["native.cgroupdriver=systemd"],
+    "log-driver": "json-file",
+    "log-opts": {
+      "max-size": "100m"
+    },
+    "storage-driver": "overlay2"
+  }
+EOF
+  mkdir -p /etc/systemd/system/docker.service.d
+  # Restart Docker
+  systemctl daemon-reload
+  systemctl restart docker
+  sudo systemctl enable docker
+
+fi
+
+sleep 30
+
+## Installing kubeadm, kubelet and kubectl 
+yum --help &>> /dev/null
+if [ $? -eq 0 ]
+then
+   cat <<EOF | sudo tee /etc/yum.repos.d/kubernetes.repo
+   [kubernetes]
+   name=Kubernetes
+   baseurl=https://packages.cloud.google.com/yum/repos/kubernetes-el7-\$basearch
+   enabled=1
+   gpgcheck=1
+   repo_gpgcheck=1
+   gpgkey=https://packages.cloud.google.com/yum/doc/yum-key.gpg https://packages.cloud.google.com/yum/doc/rpm-package-key.gpg
+   exclude=kubelet kubeadm kubectl
+EOF
+   
+   # Set SELinux in permissive mode (effectively disabling it)
+   sudo setenforce 0
+   sudo sed -i 's/^SELINUX=enforcing$/SELINUX=permissive/' /etc/selinux/config
+   
+   sudo yum install -y kubelet kubeadm kubectl --disableexcludes=kubernetes
+   
+   sudo systemctl enable --now kubelet
+   systemctl stop firewalld
+   systemctl disable firewalld
+   
+else
+   
+   sudo apt-get update && sudo apt-get install -y apt-transport-https curl
+   curl -s https://packages.cloud.google.com/apt/doc/apt-key.gpg | sudo apt-key add -
+   cat <<EOF | sudo tee /etc/apt/sources.list.d/kubernetes.list
+   deb https://apt.kubernetes.io/ kubernetes-xenial main
+EOF
+   sudo apt-get update
+   sudo apt-get install -y kubelet kubeadm kubectl
+   sudo apt-mark hold kubelet kubeadm kubectl
+   systemctl stop ufw
+   systemctl disable ufw
+fi
+
+sleep 30
+sudo chmod +x /vagrant/cltjoincommand.sh   <<<< this joins this worker node to the master
+sudo /vagrant/cltjoincommand.sh
+
+
+
+
+######################### local kubectl from VSCode terminal
+
+Cat ~/.kube/config in home directory of master node and also in 
+
+
+Sudo -i
+/root/.kube/config
+
+
+
+
+I can set KUBECONFIG in a terminal to test this out locally on terminal
+
+~/.kube/kubeadm_project13
+
+
+Copy the .kube config file above from master into a config file here and export KUBECONFIG=~/.kube/kubeadm_project13/config
