@@ -2,6 +2,7 @@
 #shell scripts below with notes
 
 #these scripts were changed for cri-dockerd and changes with 1.29 k8s
+# the latest changes are committed to dmastrop/https://github.com/dmastrop/vprofile_k8s_kubeadm_kops_EKS_project13
 
 
 # References:
