@@ -86,6 +86,36 @@ EOF
   systemctl restart docker
   sudo systemctl enable docker
 
+  ##### ADDED: cri-dockerd
+  cd /tmp
+  wget https://github.com/Mirantis/cri-dockerd/releases/download/v0.3.12/cri-dockerd-0.3.12.amd64.tgz
+  tar xvf cri-dockerd-0.3.12.amd64.tgz
+  sudo mv cri-dockerd /usr/local/bin
+  #cri-dockerd --version
+  #cri-dockerd 0.2.0 (HEAD)
+  wget https://raw.githubusercontent.com/Mirantis/cri-dockerd/master/packaging/systemd/cri-docker.service
+  wget https://raw.githubusercontent.com/Mirantis/cri-dockerd/master/packaging/systemd/cri-docker.socket
+  sudo mv cri-docker.socket cri-docker.service /etc/systemd/system/
+  sudo sed -i -e 's,/usr/bin/cri-dockerd,/usr/local/bin/cri-dockerd,' /etc/systemd/system/cri-docker.service
+  
+  sudo chmod +x /etc/systemd/system/cri-docker.socket
+  sudo chmod +x /etc/systemd/system/cri-docker.service
+
+  
+  sudo systemctl daemon-reload
+  sudo systemctl enable cri-docker.service
+  sudo systemctl enable --now cri-docker.socket
+
+  cd /usr/local/bin/cri-dockerd
+  sudo ./cri-dockerd&
+
+
+  ######
+
+
+
+########
+
 fi
 
 sleep 30
@@ -117,10 +147,27 @@ EOF
 
 else
 
-   sudo apt-get update && sudo apt-get install -y apt-transport-https curl
-   curl -s https://packages.cloud.google.com/apt/doc/apt-key.gpg | sudo apt-key add -
-   cat <<EOF | sudo tee /etc/apt/sources.list.d/kubernetes.list
-   deb https://apt.kubernetes.io/ kubernetes-xenial main
+   #sudo apt-get update && sudo apt-get install -y apt-transport-https curl
+   #curl -s https://packages.cloud.google.com/apt/doc/apt-key.gpg | sudo apt-key add -
+   #cat <<EOF | sudo tee /etc/apt/sources.list.d/kubernetes.list
+   #deb https://apt.kubernetes.io/ kubernetes-xenial main
+
+   ######## ADDED:
+   sudo apt-get update
+   # apt-transport-https may be a dummy package; if so, you can skip that package
+   sudo apt-get install -y apt-transport-https ca-certificates curl gpg
+
+   # If the directory `/etc/apt/keyrings` does not exist, it should be created before the curl command, read the note below.
+   sudo mkdir -p -m 755 /etc/apt/keyrings
+   curl -fsSL https://pkgs.k8s.io/core:/stable:/v1.29/deb/Release.key | sudo gpg --dearmor -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg
+
+   # This overwrites any existing configuration in /etc/apt/sources.list.d/kubernetes.list
+   echo 'deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v1.29/deb/ /' | sudo tee /etc/apt/sources.list.d/kubernetes.list
+   #######
+
+
+
+
 EOF
    sudo apt-get update
    sudo apt-get install -y kubelet kubeadm kubectl
@@ -131,9 +178,33 @@ fi
 
 #sleep 30
 
-sudo kubeadm init --pod-network-cidr 10.244.0.0/16 --apiserver-advertise-address=192.168.56.2 > /tmp/kubeadm_out.log
+
+
+###### ADDED
+#sudo kubeadm config images pull --cri-socket /run/cri-dockerd.sock
+#nano /etc/sysconfig/kubelet
+# add the following flags to KUBELET_KUBEADM_ARGS variable
+#KUBELET_KUBEADM_ARGS="... --container-runtime=remote --container-runtime-endpoint=/run/cri-dockerd.sock"
+#sudo kubeadm config images pull --cri-socket unix:///var/run/cri-dockerd.sock
+#########
+
+
+
+
+
+#sudo kubeadm init --pod-network-cidr 10.244.0.0/16 --apiserver-advertise-address=192.168.56.2 > /tmp/kubeadm_out.log
+## ADDED
+sudo kubeadm init --cri-socket unix:///var/run/cri-dockerd.sock --pod-network-cidr 10.244.0.0/16 --apiserver-advertise-address=192.168.56.2 > /tmp/kubeadm_out.log
+##
+
 sleep 360
+#/vagrant/set-kubeconfig.sh
+## ADDED
+sudo chmod +x /vagrant/set-kubeconfig.sh
 /vagrant/set-kubeconfig.sh
+
+
+
 sudo kubectl apply -f "https://cloud.weave.works/k8s/net?k8s-version=$(kubectl version | base64 | tr -d '\n')"
 kubectl apply -f "https://cloud.weave.works/k8s/net?k8s-version=$(kubectl version | base64 | tr -d '\n')"
 sleep 60
