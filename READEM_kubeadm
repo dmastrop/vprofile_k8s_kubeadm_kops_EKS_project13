@@ -1,6 +1,8 @@
 
 #shell scripts below with notes
 
+#these scripts were changed for cri-dockerd and changes with 1.29 k8s
+
 
 # References:
 
