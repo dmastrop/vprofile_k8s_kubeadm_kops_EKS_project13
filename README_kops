@@ -1,0 +1,172 @@
+.Kops on AWS
+
+
+****Previous setup
+
+
+Do kops but note I have this working already
+See this first link to section above
+See this link to section above
+Retest it once again.
+
+
+Review of previous setup and IAM user settings
+
+
+In the terminal that going to run kops use this (or use - - profile switch with each command, but better to do it this way):
+
+
+% export AWS_PROFILE=kops
+% echo $AWS_PROFILE
+kops
+
+
+% aws configure list
+      Name                    Value             Type    Location
+      ----                    -----             ----    --------
+   profile                     kops              env    ['AWS_PROFILE', 'AWS_DEFAULT_PROFILE']
+**********     ******************** ****************    
+**********     ******************** ****************   
+    region                <not set>             None    None
+
+
+
+Added [kops] profile earlier after creating the kops_project13 IAM user with Admin rights:
+
+
+% cat ~/.aws/credentials 
+[default]
+********
+********
+
+[kops]
+********
+********
+
+[vscode]
+# This key identifies your AWS account.
+
+
+
+% cat ~/.aws/config     
+[default]
+region = us-east-1
+output = json
+
+
+kops profile
+
+this IAM user is kops_project13 and as Administrator access. This can be narrowed down (see documentation above) but this is ok for now.
+
+This will permit kops interfacing with AWS to set up entire infrastructure regardless of commands, etc…..
+
+
+
+Kops commands
+
+aws s3api create-bucket --bucket s3.kubernetes1.xxxxxxxxxxxxx.com --region us-west-1 --create-bucket-configuration LocationConstraint=us-west-1 --profile kops <<<< --profile=kops  profile switch only works with aws commands not kops cli commands, so use the AWS_PROFILE export above.  All commands in that terminal will run with kops IAM user
+
+
+
+aws s3api put-bucket-versioning --bucket s3.kubernetes1.xxxxxxxxxx.com --versioning-configuration Status=Enabled --profile kops
+
+
+export KOPS_CLUSTER_NAME=kubernetes1.xxxxxxxx.com
+
+dig NS kubernetes1.xxxxxxxx.com
+
+
+
+export KOPS_STATE_STORE=s3://s3.kubernetes1.xxxxxxxxxxx.com
+
+
+Set configuration of cluster parameters (note must have a public/private key pair ssh kegen)
+
+kops create cluster --node-count=3 --node-size=t3.large --zones=us-east-1a,us-east-1b,us-east-1c --master-size=t3.large --master-zones=us-east-1a,us-east-1b,us-east-1c --ssh-public-key=kops.pub
+
+
+
+
+Set KUBECONFIG prior to executing the cluster deployment,  because once execute the above configuration it will overwrite the existing .kube/config (docker desktop)
+This is ok and can run multiple contexts but better to keep separate to avoid corrupting the config file.
+
+define the KUBECONFIG env variable to point to the file that you want to run kops kubeconfig from
+
+/Users/xxxxxxxxxxxxx/.kube/kops
+
+ % export KUBECONFIG=/Users/xxxxxxxxxxx/.kube/kops/config       <<<< there must be a dummy file in there.
+
+
+
+
+kops update cluster --name kubernetes1.xxxxxxxxxxxxx.com --yes --admin
+
+
+ssh -i kops ubuntu@api.kubernetes1.xxxxxxxxxxxxx.com
+
+
+kops validate cluster                                        
+
+3 control nodes and 3 worker nodes are up and ready
+
+
+kubectl get nodes --show-labels   
+                           
+kubectl get node -o wide
+
+
+kops delete cluster --yes
+
+
+
+
+
+##### using EC2 instance to deploy kops project 13
+
+
+Deploy the k8s cluster with kops (project13 style)
+
+
+Name: kopsvprofile-project13.xxxxxxxxxxx.com
+S3:  vprofile-kops-s3-state-project13
+
+Create config cluster: 
+kops create cluster --name=kopsvprofile-project13.xxxxxxxxxxx.com \
+--state=s3://vprofile-kops-s3-state-project13 --zones=us-east-1a,us-east-1b \
+--node-count=2 --node-size=t3.small --master-size=t3.medium --dns-zone=kopsvprofile-project13.xxxxxxxxxxx.com \
+--node-volume-size=8 --master-volume-size=8 --ssh-public-key=~/.ssh/kopskey.pub
+
+
+
+
+Deploy cluster:
+kops update cluster --name=kopsvprofile-project13.xxxxxxxxxxx.com --state=s3://vprofile-kops-s3-state-project13 --yes --admin
+
+
+No --ssh-pubic-key=kopskey.pub required??????  Need to specify it in the config if want to ssh to the hosts.
+
+ssh -i ~/.ssh/kopskey ubuntu@api.kopsvprofile-project13.xxxxxxxxxxx.com
+
+
+
+
+
+Validate cluster:
+kops validate cluster --state=s3://vprofile-kops-s3-state-project13
+
+
+Delete cluster:
+kops delete cluster --name=kopsvprofile-project13.xxxxxxxxxxx.com --state=s3://vprofile-kops-s3-state-project13 --yes
+
+
+
+
+Config cluster output
+
+
+ubuntu@ip-172-31-85-82:~$ kops create cluster --name=kopsvprofile-project13.xxxxxxxxxxx.com \
+--state=s3://vprofile-kops-s3-state-project13 --zones=us-east-1a,us-east-1b \
+--node-count=2 --node-size=t3.small --master-size=t3.medium --dns-zone=kopsvprofile-project13.xxxxxxxxxxx.com \
+--node-volume-size=8 --master-volume-size=8 --ssh-public-key=~/.ssh/kopskey.pub
+
+
