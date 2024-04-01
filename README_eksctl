@@ -1,0 +1,38 @@
+Start the vagrant VM up (Vagrantfile) vagrant up in project13 workspace
+
+
+ssh into the vagrant VM: vagrant ssh from workspace
+
+aws cli, eksctl and kubectl installation (These have to be installed manually with eks-tools-setup.sh)
+
+Create the IAM user with Admin permissions and save the Access key and secret key
+
+Do the aws configure with the IAM user created with Admin rights (IAM user eskctl-admin-project13) us-east-1 region
+
+Go to /vagrant shared workspace directory on the ssh session
+
+chmod +x eks-cluster-setup.sh
+
+Execute the script to bring up the EKS cluster on AWS: ./eks-cluster-setup.sh
+
+
+from the VM execute: kubectl get nodes
+
+kubectl get nodes
+NAME                             STATUS   ROLES    AGE   VERSION
+ip-192-168-28-229.ec2.internal   Ready    <none>   13m   v1.23.17-eks-5e0fdde
+ip-192-168-55-130.ec2.internal   Ready    <none>   13m   v1.23.17-eks-5e0fdde
+
+
+Once the cluster is up try to SSH into the nodes:
+
+Use the pem rsa key created prior: vprofile-eks-key
+The SSH can be done from the local workspace terminal to the public ips of the worker nodes (get these from EC instances)
+
+kubectl can be used to configure the pods, etc.
+
+To destroy the EKS cluster:  Delete the eksctl clulster:        
+eksctl delete cluster vprofile-eskctl-cluster-project13
+
+test
+
