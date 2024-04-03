@@ -1,7 +1,7 @@
 .Kops on AWS
 
 
-****Previous setup
+****Previous setup on AWS1 setup
 
 
 Do kops but note I have this working already
@@ -121,7 +121,7 @@ kops delete cluster --yes
 
 
 
-##### using EC2 instance to deploy kops project 13
+##### using EC2 instance to deploy kops project 13 on AWS1 setup (using new EC2 instance on AWS2 setup used for project14)
 
 
 Deploy the k8s cluster with kops (project13 style)
